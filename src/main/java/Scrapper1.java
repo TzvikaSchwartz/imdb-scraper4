@@ -6,67 +6,43 @@ import org.jsoup.select.Elements;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 public class Scrapper1 {
-    private final String title;
-    private static final File dir = new File("queries");
-    private static final String[] categories = new String[]{"ft", "tv", "ep"};
+    private final File queriesResultsDir;
+    private final static ArrayList<String> types = new ArrayList<>(Arrays.asList("movie", "tv", "tv episode"));
+    private final static ArrayList<String> searchTypes = new ArrayList<>(Arrays.asList("&ttype=ft", "&ttype=ft", "&ttype=ft"));
 
-    public Scrapper1(String title, int category) {
-        this.title = title;
-        try {
-
-            if (!dir.isDirectory() && !dir.mkdirs()){
-                throw new IOException("Failed to create directory");
-            }
-            String ttype = category == 4? "": "&ttype=" + categories[category-1];
-            String type = category == 4? "": (" (" + categories[category-1] + ")");
-            final File file = new File(dir, title + type + ".txt");
-            final FileWriter writeToFile = new FileWriter( file);
-            final Document document = Jsoup.connect("https://www.imdb.com/find?s=tt"
-                    + ttype + "&q=" + title + "&ref_=nv_sr_sm").get();
-            //^from array of categories by category (-1 to index)
-            int i = 0;
-            for (Element row : document.select("table.findList tr")) {
-                final String title2 = row.select(".result_text a").text();
-                final String title3 = row.select(".result_text").text();
-
-                //if the movie not in development and the title match without spaces
-                if (title3.toLowerCase().indexOf("in development") == -1 &&
-                        title2.toLowerCase().indexOf(title.toLowerCase()) != -1) {
-
-                    final String url = "https://www.imdb.com/"+ row.select(".result_text a")
-                            .attr("href");
-
-                    final Document document1 = Jsoup.connect(url).get();
-
-                    writeToFile.write(title2+"|");
-
-                    //find the scripts (in javascript) to extract data about the movie
-                    Elements scripts = document1.select("script[type=application/ld+json]");
-
-                    writeToFile.write(genres(scripts.first().data()) + "|");
-
-                    String MPAA_rating = MPAA_rating(scripts.first().data());
-                    if (!MPAA_rating.equals("Not Rated") && !MPAA_rating.equals("Unrated"))
-                        writeToFile.write(MPAA_rating);
-                    writeToFile.write("|");
-
-                    writeToFile.write(duration(scripts.first().data()) + "|");
-
-                    writeToFile.write(directors(scripts.first().data()) + "|");
-
-                    writeToFile.write(stars(scripts.first().data()));
-
-                    writeToFile.write("\n");
-
-                }
-            }
-            writeToFile.close();
+    public Scrapper1(String dirName) throws IOException{
+        queriesResultsDir = new File(dirName);
+        if (!queriesResultsDir.isDirectory() && !queriesResultsDir.mkdirs()) {
+            throw new IOException("Failed to create directory");
         }
-        catch (IOException e){
-            System.out.println(e.getMessage());
+    }
+
+    public Scrapper1() throws IOException {
+        this("queries results");
+    }
+
+    public void addQuery(String inputTitle, String category) throws IOException{
+
+        String searchType = "";
+        String type = "";
+        
+        if (types.contains(category.toLowerCase())) {
+            type = " (" + category.toLowerCase() + ")";
+            searchType = searchTypes.get(types.indexOf(category.toLowerCase()));
         }
+        else if (!category.equalsIgnoreCase(""))
+            ;//exception
+
+        runImdbQueryAndWriteToFile(inputTitle, type, searchType);
+
+    }
+
+    public void addQuery(String title) throws  IOException{
+        addQuery(title, "");
     }
 
     /**
@@ -96,17 +72,17 @@ public class Scrapper1 {
             return "";
         int j = script.indexOf(']',i);
         String starsList = script.substring(i+"\"actor\":".length()+1,j);
-        String stars = "";
+        StringBuilder stars = new StringBuilder();
         i = starsList.indexOf("\"name\":\"");
         //extract stars one by one
         while(i != -1) {
             j = starsList.indexOf('\"', i+"\"name\":\"".length()+1);
-            stars += starsList.substring(i+"\"name\":".length()+1,j);
+            stars.append(starsList, i + "\"name\":".length() + 1, j);
             i = starsList.indexOf("\"name\":\"", i+1);
             if (i != -1)
-                stars += ",";
+                stars.append(",");
         }
-        return stars;
+        return stars.toString();
     }
 
     /**
@@ -120,16 +96,16 @@ public class Scrapper1 {
             return "";
         int j = script.indexOf(']',i);
         String directorsList = script.substring(i+"\"director\":".length()+1,j);
-        String directors = "";
+        StringBuilder directors = new StringBuilder();
         i = directorsList.indexOf("\"name\":\"");
         while(i != -1) {
             j = directorsList.indexOf('\"', i+"\"name\":\"".length()+1);
-            directors += directorsList.substring(i+"\"name\":".length()+1,j);
+            directors.append(directorsList, i + "\"name\":".length() + 1, j);
             i = directorsList.indexOf("\"name\":\"", i+1);
             if (i != -1)
-                directors += ",";
+                directors.append(",");
         }
-        return directors;
+        return directors.toString();
     }
 
     /**
@@ -162,4 +138,58 @@ public class Scrapper1 {
                 .replace("H", "h ")
                 .replace("M", "min");
     }
+
+    private void writeToFileFromScript(FileWriter fileWriter, String title, String script) throws IOException {
+        fileWriter.write(title+"|");
+
+        fileWriter.write(genres(script) + "|");
+
+        String MPAA_rating = MPAA_rating(script);
+        if (!MPAA_rating.equals("Not Rated") && !MPAA_rating.equals("Unrated"))
+            fileWriter.write(MPAA_rating);
+        fileWriter.write("|");
+
+        fileWriter.write(duration(script) + "|");
+
+        fileWriter.write(directors(script) + "|");
+
+        fileWriter.write(stars(script));
+
+        fileWriter.write("\n");
+    }
+
+    private void runImdbQueryAndWriteToFile(String inputTitle, String type, String searchType) throws IOException{
+        final File fileResult = new File(queriesResultsDir, inputTitle + type + ".txt");
+
+        if (!fileResult.exists()) {
+            final FileWriter writeToFile = new FileWriter(fileResult);
+            final Document document = Jsoup.connect("https://www.imdb.com/find?s=tt"
+                    + searchType + "&q=" + inputTitle + "&ref_=nv_sr_sm").get();
+
+            for (Element row : document.select("table.findList tr")) {
+                final String title = row.select(".result_text a").text();
+                final String innerTitle = row.select(".result_text").text();
+
+                //if the movie not in development and the title match without spaces
+                if (!innerTitle.toLowerCase().contains("in development") &&
+                        title.toLowerCase().contains(inputTitle.toLowerCase())) {
+
+                    final String url = "https://www.imdb.com/"+ row.select(".result_text a")
+                            .attr("href");
+
+                    //
+                    final Document document1 = Jsoup.connect(url).get();
+
+                    //find the scripts (in javascript) to extract data about the movie
+                    Elements scripts = document1.select("script[type=application/ld+json]");
+
+                    writeToFileFromScript(writeToFile, title, scripts.first().data());
+
+                }
+            }
+            writeToFile.close();
+        }
+
+    }
+
 }
