@@ -35,7 +35,7 @@ public class Scrapper1 {
             searchType = searchTypes.get(types.indexOf(category.toLowerCase()));
         }
         else if (!category.equalsIgnoreCase(""))
-            ;//exception
+            throw new IOException("Error category for search");
 
         runImdbQueryAndWriteToFile(inputTitle, type, searchType);
 
